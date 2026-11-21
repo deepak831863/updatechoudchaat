@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #efeae2;
+  --panel: #ffffff;
+  --panel-2: #f0f2f5;
+  --header: #f0f2f5;
+  --line: #e9edef;
+  --fg: #111b21;
+  --muted: #667781;
+  --accent: #008069;
+  --accent-ink: #ffffff;
+  --bubble-out: #d9fdd3;
+  --bubble-in: #ffffff;
+  --chat: #efeae2;
+  --doodle: rgba(17, 27, 33, 0.08);
+  --tick: #53bdeb;
+  --danger: #c4303b;
+  color-scheme: light;
+}
+
+:root.dark {
+  --bg: #0b141a;
+  --panel: #111b21;
+  --panel-2: #202c33;
+  --header: #202c33;
+  --line: #2a3942;
+  --fg: #e9edef;
+  --muted: #8696a0;
+  --accent: #00a884;
+  --accent-ink: #041410;
+  --bubble-out: #005c4b;
+  --bubble-in: #202c33;
+  --chat: #0b141a;
+  --doodle: rgba(233, 237, 239, 0.045);
+  --tick: #53bdeb;
+  --danger: #f15c6d;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-header: var(--header);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-bubble-out: var(--bubble-out);
+  --color-bubble-in: var(--bubble-in);
+  --color-chat: var(--chat);
+  --color-tick: var(--tick);
+  --color-danger: var(--danger);
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+.chat-canvas {
+  background-color: var(--chat);
+  background-image: radial-gradient(var(--doodle) 0.7px, transparent 0.7px);
+  background-size: 16px 16px;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}

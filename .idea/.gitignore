@@ -1,0 +1,29 @@
+# Existing IDE files
+/shelf/
+/workspace.xml
+/httpRequests/
+/queries/
+/dataSources/
+/dataSources.local.xml
+
+# Dependencies
+node_modules/
+
+# Environment secrets
+.env
+.env.local
+.env.production
+
+# Build files
+dist/
+build/
+.next/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db

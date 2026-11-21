@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "CloudChat",
+      "hasCanvas": false,
+      "bodyTextLen": 20,
+      "bodyTextHash": "e1aeb037b46599722987f3d3dfae27da2245eeca6c9edd263cd6953d07dd22e3",
+      "bodyTextPrefix": "C Opening CloudChat…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "CloudChat",
+      "hasCanvas": false,
+      "bodyTextLen": 20,
+      "bodyTextHash": "e1aeb037b46599722987f3d3dfae27da2245eeca6c9edd263cd6953d07dd22e3",
+      "bodyTextPrefix": "C Opening CloudChat…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

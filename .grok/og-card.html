@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+    background: #0B141A;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+    color: #E9EDEF;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    position: relative;
+    width: 1200px;
+    height: 630px;
+    background:
+      radial-gradient(ellipse 68% 78% at 50% 46%, #143038 0%, #0B141A 64%);
+    overflow: hidden;
+  }
+  .cloud {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    width: 860px;
+    height: 420px;
+    transform: translate(-50%, -52%);
+    opacity: 0.16;
+  }
+  .grain {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.18;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+    mix-blend-mode: overlay;
+  }
+  .panel {
+    position: absolute;
+    width: 228px;
+    background: #111B21;
+    border: 1px solid rgba(233, 237, 239, 0.07);
+    border-radius: 28px;
+    padding: 18px 16px 16px;
+    box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+  }
+  .panel.left { left: 36px; top: 168px; width: 196px; }
+  .panel.right { right: 36px; top: 142px; width: 196px; }
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #00A884;
+    flex: none;
+  }
+  .avatar.dim { background: #1f3a36; }
+  .namebar {
+    height: 8px;
+    width: 78px;
+    border-radius: 99px;
+    background: #8696A0;
+    opacity: 0.45;
+  }
+  .namebar.short { width: 52px; }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .pill {
+    height: 36px;
+    border-radius: 18px;
+  }
+  .in { background: #1c2a31; align-self: flex-start; }
+  .out { background: #00A884; align-self: flex-end; }
+  .w1 { width: 78%; }
+  .w2 { width: 58%; }
+  .w3 { width: 88%; }
+  .w4 { width: 46%; }
+  .w5 { width: 70%; }
+  .w6 { width: 40%; }
+  .lockup {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+  .mark { width: 72px; height: 46px; margin-bottom: 18px; }
+  .title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 168px;
+    line-height: 0.86;
+    letter-spacing: -0.035em;
+    color: #E9EDEF;
+    text-align: center;
+  }
+  .title span { display: block; }
+  .title .chat {
+    letter-spacing: 0.145em;
+    margin-left: 0.145em;
+    margin-top: 8px;
+  }
+  .rule {
+    width: 72px;
+    height: 5px;
+    border-radius: 99px;
+    background: #00A884;
+    margin: 26px 0 16px;
+  }
+  .tag {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: #8696A0;
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <svg class="cloud" viewBox="0 0 860 420" aria-hidden="true">
+      <path fill="#00A884" d="M250 250c-70 8-118-48-96-112 18-52 78-74 132-58 22-62 98-90 164-62 54 24 74 82 54 132 62 6 104 58 96 118-8 58-62 96-122 92H292c-18 0-32-4-42-10z"/>
+    </svg>
+    <div class="panel left">
+      <div class="who">
+        <div class="avatar dim"></div>
+        <div class="namebar"></div>
+      </div>
+      <div class="stack">
+        <div class="pill in w1"></div>
+        <div class="pill out w2"></div>
+        <div class="pill in w3"></div>
+        <div class="pill out w4"></div>
+      </div>
+    </div>
+    <div class="panel right">
+      <div class="who">
+        <div class="avatar"></div>
+        <div class="namebar short"></div>
+      </div>
+      <div class="stack">
+        <div class="pill out w5"></div>
+        <div class="pill in w6"></div>
+        <div class="pill in w1"></div>
+        <div class="pill out w2"></div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg class="mark" viewBox="0 0 72 46" aria-hidden="true">
+        <path fill="#00A884" d="M22 30c-8 .6-13.4-5.2-11-12.4 1.8-5.6 8.4-8 14.4-6.4 2.2-6.6 10.4-9.6 17.6-6.6 5.8 2.4 8 8.6 6 14.2 6.6.6 11.2 6.2 10.4 12.6-.8 6.2-6.6 10.2-13 9.8H26.2c-1.8 0-3.2-.4-4.2-1.2z"/>
+      </svg>
+      <p class="title"><span>CLOUD</span><span class="chat">CHAT</span></p>
+      <div class="rule"></div>
+      <p class="tag">Talk from anywhere</p>
+    </div>
+    <div class="grain"></div>
+  </div>
+</body>
+</html>
