@@ -269,6 +269,36 @@ export const sendMessage = createServerFn({ method: "POST" })
     }
   });
 
+const phoneInput = z.object({
+  phoneNumber: z.string().trim().regex(/^\+?[0-9]{7,15}$/),
+});
+
+export const updatePhoneNumber = createServerFn({ method: "POST" })
+  .validator((input: unknown) => parseInput(phoneInput, input))
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }): Promise<{ ok: true }> => {
+    try {
+      const db = await getMongoDatabase();
+      const existing = await db.collection("profiles").findOne({
+        phoneNumber: data.phoneNumber,
+        userId: { $ne: context.userId },
+      });
+      if (existing) throw new Error("That phone number is already used by another account");
+      await db.collection("profiles").updateOne(
+        { userId: context.userId },
+        { $set: { phoneNumber: data.phoneNumber } },
+        { upsert: true },
+      );
+      await db.collection("user").updateOne(
+        { id: context.userId },
+        { $set: { phoneNumber: data.phoneNumber } },
+      );
+      return { ok: true };
+    } catch (error) {
+      friendly(error);
+    }
+  });
+
 const deleteInput = z.object({
   messageId: z.string().uuid(),
   scope: z.enum(["me", "everyone"]),
@@ -352,7 +382,9 @@ export const searchUsers = createServerFn({ method: "POST" })
         id: { $ne: uid },
         $or: [
           { name: { $regex: escaped, $options: "i" } },
-          { email: { $regex: escaped, $options: "i" } },
+          { username: { $regex: escaped, $options: "i" } },
+          { phoneNumber: { $regex: escaped, $options: "i" } },
+          { id: escaped },
         ],
       }).sort({ name: 1 }).limit(20).toArray();
       const people: Person[] = [];
@@ -373,7 +405,7 @@ export const searchUsers = createServerFn({ method: "POST" })
     }
   });
 
-const openInput = z.object({ otherUserId: z.string().trim().min(1).max(200) });
+const openInput = z.object({ identifier: z.string().trim().min(1).max(200) });
 
 export const openChat = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseInput(openInput, input))
@@ -383,7 +415,29 @@ export const openChat = createServerFn({ method: "POST" })
       const db = await getMongoDatabase();
       const uid = context.userId;
       await touchProfile(db, uid);
-      const other = data.otherUserId;
+      const identifier = data.identifier;
+      const normalizedPhone = identifier.replace(/[^\d+]/g, "");
+      const phoneProfile = normalizedPhone
+        ? await db.collection("profiles").findOne<{ userId: string }>({
+            phoneNumber: { $in: [identifier, normalizedPhone] },
+          })
+        : null;
+      const found = identifier === uid
+        ? { id: uid }
+        : phoneProfile
+          ? { id: phoneProfile.userId }
+          : await db.collection("user").findOne<{ id: string }>(
+              {
+                $or: [
+                  { id: identifier },
+                  { username: identifier.toLowerCase() },
+                  { phoneNumber: identifier },
+                  ...(normalizedPhone ? [{ phoneNumber: normalizedPhone }] : []),
+                ],
+              },
+            );
+      if (!found) throw new Error("User not found");
+      const other = found.id;
       if (other !== uid) {
         const found = await db.collection("user").findOne<{ id: string; name?: string; email?: string; image?: string }>({ id: other });
         if (!found) throw new Error("User not found");

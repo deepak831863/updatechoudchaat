@@ -34,10 +34,7 @@ Set these variables in your shell or deployment environment:
 | `BETTER_AUTH_SECRET` | Production auth | Stable secret used to sign Better Auth state |
 | `BETTER_AUTH_URL` | Production auth | Public origin of the app, e.g. `https://chat.example.com` |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | No | Optional comma-separated extra origins, e.g. a custom domain |
-| `GROK_AUTH_ISSUER` | Optional | Generic OAuth broker issuer |
-| `GROK_AUTH_CLIENT_ID` | Optional | OAuth broker client ID |
-| `GROK_AUTH_CLIENT_SECRET` | Optional | OAuth broker client secret |
-| `VITE_AUTH_ENABLED` | No | Set to `false` only for auth-disabled local development |
+| `VITE_AUTH_ENABLED` | No | Set to `true` for direct username/password authentication |
 
 Do not commit `.env` files or secrets. For Better Auth deployments, configure `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` as server environment variables.
 
@@ -47,7 +44,7 @@ Do not commit `.env` files or secrets. For Better Auth deployments, configure `B
 npm install
 ```
 
-Enable authentication and MongoDB by setting `MONGODB_URI` and `VITE_AUTH_ENABLED=true` for your environment. CloudChat displays Google sign-in only.
+Enable authentication and MongoDB by setting `MONGODB_URI` and `VITE_AUTH_ENABLED=true` for your environment. CloudChat uses direct username/password accounts only.
 
 Start the development server:
 
@@ -75,17 +72,16 @@ npm run preview
 
 ## Authentication setup
 
-CloudChat uses Better Auth at `/api/auth/*` with Google sign-in through the configured Grok OAuth broker. Email/password sign-in is disabled. MongoDB stores users, accounts, sessions, and verification records through the Better Auth MongoDB adapter.
+CloudChat uses Better Auth at `/api/auth/*` with direct username/password sign-in and account creation. No OTP or third-party social login is used. A phone number is optional and is used only for account lookup. MongoDB stores users, accounts, sessions, and verification records through the Better Auth MongoDB adapter.
 
 For production:
 
 1. Set `MONGODB_URI`.
 2. Set a strong `BETTER_AUTH_SECRET`.
 3. Set `BETTER_AUTH_URL` to the deployed HTTPS origin.
-4. Configure `GROK_AUTH_*` variables if broker OAuth is used.
-5. Enable auth in the app environment.
-6. Set `BETTER_AUTH_URL` to the exact public HTTPS origin, including no trailing slash.
-7. Redeploy after changing the public origin or OAuth variables.
+4. Enable auth in the app environment.
+5. Set `BETTER_AUTH_URL` to the exact public HTTPS origin, including no trailing slash.
+6. Redeploy after changing the public origin.
 
 Protected chat operations verify the current Better Auth session server-side. Client-supplied user IDs are never used for authorization.
 
@@ -101,5 +97,4 @@ The existing Vite/TanStack, Nitro, PWA, and preview configuration is preserved. 
 - **MongoDB connection timeout**: verify the URI, credentials, DNS/network access, MongoDB Atlas IP allowlist, and replica-set configuration.
 - **Unauthorized while accessing chats**: sign in again and verify `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are stable across deployed instances.
 - **Invalid origin**: set `BETTER_AUTH_URL` to the exact public origin and verify no accidental HTTP/HTTPS mismatch.
-- **OAuth `Invalid origin` or `state_mismatch`**: set `BETTER_AUTH_URL` to the exact deployed HTTPS URL, enable `VITE_AUTH_ENABLED=true`, set a stable `BETTER_AUTH_SECRET`, configure MongoDB, and redeploy once with the final public URL. If using a custom domain, add it to `BETTER_AUTH_TRUSTED_ORIGINS`.
 - **No chat conversations appear**: create a chat by searching for another signed-in user, or use the Message yourself option in the existing UI.

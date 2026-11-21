@@ -76,6 +76,8 @@ export async function ensureMongoIndexes(): Promise<void> {
     ),
     db.collection("user").createIndex({ email: 1 }),
     db.collection("user").createIndex({ name: 1 }),
+    db.collection("user").createIndex({ username: 1 }, { unique: true, sparse: true }),
+    db.collection("user").createIndex({ phoneNumber: 1 }, { unique: true, sparse: true }),
     db.collection("session").createIndex({ token: 1 }, { unique: true }),
     db.collection("session").createIndex({ userId: 1 }),
     db.collection("session").createIndex({ expiresAt: 1 }),

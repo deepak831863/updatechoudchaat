@@ -242,9 +242,9 @@ export function ChatScreen() {
     setDark(next);
   }
 
-  async function startChat(otherUserId: string) {
+  async function startChat(identifier: string) {
     try {
-      const { conversationId } = await openChat({ data: { otherUserId } });
+      const { conversationId } = await openChat({ data: { identifier } });
       setComposing(false);
       setDirectoryQuery("");
       setActiveId(conversationId);
@@ -374,7 +374,7 @@ export function ChatScreen() {
                 autoFocus
                 value={directoryQuery}
                 onChange={(event) => setDirectoryQuery(event.target.value)}
-                placeholder="Search people by name or email"
+                placeholder="Search by username, user ID, or phone"
                 className="h-11 min-w-0 flex-1 rounded-full bg-panel-2 px-4 text-sm outline-none"
               />
             </div>
