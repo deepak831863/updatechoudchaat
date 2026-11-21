@@ -17,6 +17,8 @@ function LoginPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +33,24 @@ function LoginPage() {
     event.preventDefault();
     setError(null);
     const cleanUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,30}$/.test(cleanUsername)) {
+    const cleanPhone = cleanUsername.replace(/[^\d+]/g, "");
+    if (mode === "signup" && !/^[a-z0-9_]{3,30}$/.test(cleanUsername)) {
       setError("Username must contain 3–30 letters, numbers, or underscores.");
       return;
     }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
+    }
+    if (mode === "signup") {
+      if (name.trim().length < 1) {
+        setError("Enter your name.");
+        return;
+      }
+      if (!email.trim().includes("@")) {
+        setError("Enter a valid Gmail or email address.");
+        return;
+      }
     }
     if (mode === "signup" && phoneNumber.trim()) {
       const phone = normalizePhone(phoneNumber);
@@ -51,15 +64,16 @@ function LoginPage() {
     try {
       const result = mode === "signup"
         ? await authClient.signUp.email({
-            name: cleanUsername,
-            email: `${cleanUsername}@cloudchat.local`,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
             password,
             username: cleanUsername,
           })
-        : await authClient.signIn.username({
-            username: cleanUsername,
-            password,
-          });
+        : cleanUsername.includes("@")
+          ? await authClient.signIn.email({ email: cleanUsername, password })
+          : /^\+?[0-9]{7,15}$/.test(cleanPhone)
+            ? await authClient.signIn.phoneNumber({ phoneNumber: cleanPhone, password })
+            : await authClient.signIn.username({ username: cleanUsername, password });
       if (result.error) {
         setError(result.error.message || "Could not continue.");
         setBusy(false);
@@ -105,12 +119,43 @@ function LoginPage() {
             {mode === "signin" ? "Sign in" : "Create account"}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Use your username and password.
+            {mode === "signin"
+              ? "Use Gmail, username, or mobile number."
+              : "Create a direct account — no OTP or verification."}
           </p>
 
           <form onSubmit={submit} className="mt-6 space-y-3">
+            {mode === "signup" ? (
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted">Name</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  autoComplete="name"
+                  maxLength={80}
+                  required
+                  className="w-full rounded-xl border border-line bg-panel px-3 py-3 outline-none"
+                />
+              </label>
+            ) : null}
+            {mode === "signup" ? (
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted">Gmail or email</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  autoComplete="email"
+                  placeholder="name@gmail.com"
+                  required
+                  className="w-full rounded-xl border border-line bg-panel px-3 py-3 outline-none"
+                />
+              </label>
+            ) : null}
             <label className="block text-sm">
-              <span className="mb-1 block text-muted">Username</span>
+              <span className="mb-1 block text-muted">
+                {mode === "signin" ? "Gmail, username, or mobile number" : "Username"}
+              </span>
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}

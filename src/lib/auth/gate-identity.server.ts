@@ -27,6 +27,9 @@ export type GateJwks = { keys: JWK[] };
 export type JwksFetch = (url: string) => Promise<GateJwks | null>;
 
 export function gateIdentityEnabled(): boolean {
+  if (typeof process !== "undefined" && process.env.MONGODB_URI?.trim()) {
+    return false;
+  }
   return env("VITE_AUTH_ENABLED") !== "false";
 }
 

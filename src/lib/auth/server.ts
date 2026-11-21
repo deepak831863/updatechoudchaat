@@ -30,14 +30,13 @@
  * a verified id via `@/lib/auth/middleware`.
  */
 import { betterAuth } from "better-auth";
-import { bearer, username } from "better-auth/plugins";
+import { bearer, phoneNumber, username } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { ensureDbReady, getMongoClient, getMongoDatabase } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
-import { gateIdentitySessions } from "./gate-session.server";
 import { PREVIEW_ALLOWED_HOSTS } from "./preview";
 
 /**
@@ -88,44 +87,53 @@ const configuredTrustedOrigins = env("BETTER_AUTH_TRUSTED_ORIGINS")
 // Explicit `string[]` (not a readonly tuple) — Better Auth's DynamicBaseURLConfig
 // requires a mutable `allowedHosts: string[]`.
 const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
-// Local `npm run dev` (port 8080 contract). Browsers may send Origin as any of
-// these for the same server — trusting only `localhost` rejects `127.0.0.1` and
-// breaks email/password with "Invalid origin".
-const LOCAL_DEV_ORIGINS: string[] = [
-  "http://localhost:8080",
-  "http://127.0.0.1:8080",
-  "http://[::1]:8080",
-];
-const baseURL = explicitBaseURL ?? {
-  // Include loopback hosts so dynamic baseURL resolves for local email/password
-  // (not only the preview wildcard).
-  allowedHosts: [...previewAllowedHosts, "localhost", "127.0.0.1", "[::1]"],
-  // `auto` → trust both http:// and https:// expansions of allowedHosts
-  // (preview is https; local dev is http).
+const extraAllowedHosts = configuredTrustedOrigins
+  .map((origin) => {
+    try {
+      return new URL(origin).host;
+    } catch {
+      return undefined;
+    }
+  })
+  .filter((host): host is string => Boolean(host));
+const baseURL = {
+  allowedHosts: [
+    ...previewAllowedHosts,
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "*.vercel.app",
+    ...extraAllowedHosts,
+  ],
   protocol: "auto" as const,
   fallback: "http://localhost:8080",
 };
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
-const trustedOrigins: string[] = explicitBaseURL
-  ? [
-      explicitBaseURL,
-      ...LOCAL_DEV_ORIGINS,
-      ...configuredTrustedOrigins,
-      ...(vercelUrl ? [`https://${vercelUrl}`] : []),
-      ...(vercelProductionUrl ? [`https://${vercelProductionUrl}`] : []),
-    ]
-  : [
-      // Host wildcards (matched against Origin's host)
-      ...previewAllowedHosts,
-      // Full-origin wildcards (matched against Origin)
-      ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
-      ...LOCAL_DEV_ORIGINS,
-      ...configuredTrustedOrigins,
-      ...(vercelUrl ? [`https://${vercelUrl}`] : []),
-      ...(vercelProductionUrl ? [`https://${vercelProductionUrl}`] : []),
-    ];
+const trustedOrigins = async (request?: Request): Promise<string[]> => {
+  const origins = new Set<string>([
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "https://*.vercel.app",
+    ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
+    ...configuredTrustedOrigins,
+  ]);
+  if (explicitBaseURL) origins.add(explicitBaseURL);
+  if (vercelUrl) origins.add(`https://${vercelUrl}`);
+  if (vercelProductionUrl) origins.add(`https://${vercelProductionUrl}`);
+
+  if (request) {
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const host = forwardedHost || request.headers.get("host")?.trim();
+    if (host) {
+      const proto = forwardedProto === "http" ? "http" : "https";
+      origins.add(`${proto}://${host}`);
+    }
+  }
+  return [...origins];
+};
 
 const mongodbUri = env("MONGODB_URI");
 
@@ -194,8 +202,12 @@ export const auth = betterAuth({
   },
 
   plugins: [
-    gateIdentitySessions(),
     ...(emailAndPasswordEnabled ? [username()] : []),
+    phoneNumber({
+      sendOTP: async () => {},
+      requireVerification: false,
+      phoneNumberValidator: (value) => /^\+?[0-9]{7,15}$/.test(value),
+    }),
 
     // Accept `Authorization: Bearer <session-token>` as an alternative to the
     // cookie. Needed for the LIVE PREVIEW: the app runs in an embedded iframe

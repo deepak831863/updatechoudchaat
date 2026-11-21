@@ -32,9 +32,9 @@ Set these variables in your shell or deployment environment:
 | `MONGODB_URI` | Yes for chat/auth persistence | MongoDB connection string |
 | `MONGODB_DB_NAME` | No | Database name; defaults to `cloudchat` |
 | `BETTER_AUTH_SECRET` | Production auth | Stable secret used to sign Better Auth state |
-| `BETTER_AUTH_URL` | Production auth | Public origin of the app, e.g. `https://chat.example.com` |
+| `BETTER_AUTH_URL` | Optional | Do not set for Vercel; direct origin detection is used automatically |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | No | Optional comma-separated extra origins, e.g. a custom domain |
-| `VITE_AUTH_ENABLED` | No | Set to `true` for direct username/password authentication |
+| `VITE_AUTH_ENABLED` | No | Set to `true` for direct account authentication |
 
 Do not commit `.env` files or secrets. For Better Auth deployments, configure `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` as server environment variables.
 
@@ -78,10 +78,9 @@ For production:
 
 1. Set `MONGODB_URI`.
 2. Set a strong `BETTER_AUTH_SECRET`.
-3. Set `BETTER_AUTH_URL` to the deployed HTTPS origin.
+3. Leave `BETTER_AUTH_URL` unset on Vercel so the deployed origin is detected automatically.
 4. Enable auth in the app environment.
-5. Set `BETTER_AUTH_URL` to the exact public HTTPS origin, including no trailing slash.
-6. Redeploy after changing the public origin.
+5. Redeploy after changing the public origin.
 
 Protected chat operations verify the current Better Auth session server-side. Client-supplied user IDs are never used for authorization.
 
@@ -96,5 +95,5 @@ The existing Vite/TanStack, Nitro, PWA, and preview configuration is preserved. 
 - **`MongoDB is not configured: set MONGODB_URI`**: add `MONGODB_URI` to the server environment.
 - **MongoDB connection timeout**: verify the URI, credentials, DNS/network access, MongoDB Atlas IP allowlist, and replica-set configuration.
 - **Unauthorized while accessing chats**: sign in again and verify `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are stable across deployed instances.
-- **Invalid origin**: set `BETTER_AUTH_URL` to the exact public origin and verify no accidental HTTP/HTTPS mismatch.
+- **Invalid origin**: remove `BETTER_AUTH_URL`, set `VITE_AUTH_ENABLED=true`, redeploy, and retry from the exact Vercel or custom-domain URL.
 - **No chat conversations appear**: create a chat by searching for another signed-in user, or use the Message yourself option in the existing UI.

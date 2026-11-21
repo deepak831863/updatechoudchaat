@@ -1,4 +1,4 @@
-import { usernameClient } from "better-auth/client/plugins";
+import { phoneNumberClient, usernameClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { runPreSignInSignOut, runSignOut } from "../../../scripts/sign-out-plan.mjs";
 import { GROK_PROVIDERS } from "./providers";
@@ -18,7 +18,7 @@ import { GROK_PROVIDERS } from "./providers";
  * the visitor stays signed in.
  */
 export const authClient = createAuthClient({
-  plugins: [usernameClient()],
+  plugins: [usernameClient(), phoneNumberClient()],
   fetchOptions: {
     onRequest(ctx) {
       const token = getBearerToken();
