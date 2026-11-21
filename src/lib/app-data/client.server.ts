@@ -278,7 +278,9 @@ function tokenIdentityKey(token: string): string {
             .digest("base64url");
         }
       }
-    } catch {}
+    } catch {
+      // Token parsing is optional; fall back to the unhashed bearer token.
+    }
   }
   return createHash("sha256").update(token).digest("base64url");
 }

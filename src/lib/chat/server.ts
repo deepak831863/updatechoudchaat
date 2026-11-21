@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z, ZodError } from "zod";
-import { getSql, type Sql } from "@/lib/db";
+import { getMongoDatabase } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { isConversationParticipant } from "./authorization";
 
 export type Person = {
   userId: string;
@@ -39,102 +40,81 @@ export type ChatMessage = {
   createdAt: number;
 };
 
-function num(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "bigint") return Number(value);
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "string" && value) {
-    const asNum = Number(value);
-    if (Number.isFinite(asNum) && asNum > 1e11) return asNum;
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-}
-
-function asBool(value: unknown): boolean {
-  return value === true || value === "t" || value === "true" || value === 1;
-}
+type ConversationRow = {
+  id: string;
+  lowId: string;
+  highId: string;
+  updatedAt: number;
+};
 
 function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
-  if (!result.success) {
-    throw new Error(result.error.issues[0]?.message ?? "Invalid input");
-  }
+  if (!result.success) throw new Error(result.error.issues[0]?.message ?? "Invalid input");
   return result.data;
 }
 
-function likePattern(query: string): string {
-  const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-  return `%${escaped}%`;
-}
-
 function friendly(error: unknown): never {
-  if (error instanceof ZodError) {
-    throw new Error(error.issues[0]?.message ?? "Check that and try again.");
-  }
-  if (
-    error instanceof Error &&
-    error.message &&
-    error.message.length < 180 &&
-    !/sql|relation|syntax|password authentication/i.test(error.message)
-  ) {
+  if (error instanceof ZodError) throw new Error(error.issues[0]?.message ?? "Check that and try again.");
+  if (error instanceof Error && error.message.length < 180 && !/mongo|server selection|password|uri/i.test(error.message)) {
     throw error;
   }
   console.error(error);
   throw new Error("Something went wrong. Try again.");
 }
 
-async function touchProfile(sql: Sql, userId: string): Promise<void> {
-  const rows = await sql<{ user_id: string }>`
-    insert into cc_profiles (user_id, display_name, email, image_url, last_seen)
-    select "id", "name", "email", "image", now()
-    from "user"
-    where "id" = ${userId}
-    on conflict (user_id) do update set
-      display_name = excluded.display_name,
-      email = excluded.email,
-      image_url = excluded.image_url,
-      last_seen = now()
-    returning user_id
-  `;
-  if (!rows[0]) throw new Error("Sign in required");
-  await sql`
-    insert into cc_conversations (id, low_id, high_id)
-    values (${crypto.randomUUID()}, ${userId}, ${userId})
-    on conflict (low_id, high_id) do nothing
-  `;
+async function touchProfile(db: Awaited<ReturnType<typeof getMongoDatabase>>, userId: string) {
+  const user = await db.collection("user").findOne<{ id: string; name?: string; email?: string; image?: string }>(
+    { id: userId },
+  );
+  if (!user) throw new Error("Sign in required");
+  await db.collection("profiles").updateOne(
+    { userId },
+    {
+      $set: {
+        displayName: user.name ?? "CloudChat user",
+        email: user.email ?? null,
+        imageUrl: user.image ?? null,
+        lastSeen: Date.now(),
+      },
+    },
+    { upsert: true },
+  );
+
+  await db.collection("conversations").updateOne(
+    { lowId: userId, highId: userId },
+    { $setOnInsert: { id: crypto.randomUUID(), lowId: userId, highId: userId, updatedAt: Date.now() } },
+    { upsert: true },
+  );
 }
 
-async function loadConversation(sql: Sql, userId: string, conversationId: string) {
-  const rows = await sql<{ id: string; low_id: string; high_id: string }>`
-    select id, low_id, high_id
-    from cc_conversations
-    where id = ${conversationId}
-      and (low_id = ${userId} or high_id = ${userId})
-  `;
-  return rows[0] ?? null;
+async function loadConversation(
+  db: Awaited<ReturnType<typeof getMongoDatabase>>,
+  userId: string,
+  conversationId: string,
+): Promise<ConversationRow | null> {
+  const conversation = await db.collection("conversations").findOne<ConversationRow>({
+    id: conversationId,
+  });
+  return conversation && isConversationParticipant(conversation, userId) ? conversation : null;
 }
 
 function mapMessage(row: {
   id: string;
-  conversation_id: string;
-  sender_id: string;
+  conversationId: string;
+  senderId: string;
   body: string;
   status: string;
-  deleted_everyone: unknown;
-  created_at: unknown;
+  deletedEveryone: boolean;
+  createdAt: number;
 }): ChatMessage {
-  const deleted = asBool(row.deleted_everyone);
-  const status = row.status === "read" || row.status === "delivered" ? row.status : "sent";
   return {
     id: row.id,
-    conversationId: row.conversation_id,
-    senderId: row.sender_id,
-    body: deleted ? "" : row.body,
-    status,
-    deletedEveryone: deleted,
-    createdAt: num(row.created_at),
+    conversationId: row.conversationId,
+    senderId: row.senderId,
+    body: row.deletedEveryone ? "" : row.body,
+    status: row.status === "read" || row.status === "delivered" ? row.status : "sent",
+    deletedEveryone: row.deletedEveryone,
+    createdAt: row.createdAt,
   };
 }
 
@@ -142,161 +122,104 @@ export const inbox = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<Conversation[]> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      await touchProfile(sql, uid);
-      await sql`
-        update cc_messages m
-        set status = 'delivered'
-        where m.sender_id <> ${uid}
-          and m.status = 'sent'
-          and m.deleted_everyone = false
-          and m.conversation_id in (
-            select id from cc_conversations where low_id = ${uid} or high_id = ${uid}
-          )
-      `;
-      const rows = await sql<{
-        id: string;
-        updated_at: unknown;
-        other_id: string;
-        display_name: string;
-        image_url: string | null;
-        email: string | null;
-        last_seen: unknown;
-        online: unknown;
-        last_body: string | null;
-        last_sender: string | null;
-        last_deleted: unknown;
-        last_at: unknown;
-        unread: unknown;
-        typing: unknown;
-      }>`
-        select
-          c.id,
-          (extract(epoch from c.updated_at) * 1000)::bigint as updated_at,
-          case when c.low_id = ${uid} then c.high_id else c.low_id end as other_id,
-          p.display_name,
-          p.image_url,
-          p.email,
-          (extract(epoch from p.last_seen) * 1000)::bigint as last_seen,
-          (p.last_seen > now() - interval '35 seconds') as online,
-          lm.body as last_body,
-          lm.sender_id as last_sender,
-          lm.deleted_everyone as last_deleted,
-          (extract(epoch from lm.created_at) * 1000)::bigint as last_at,
-          coalesce(uc.unread, 0) as unread,
-          (t.until_at > now()) as typing
-        from cc_conversations c
-        join cc_profiles p
-          on p.user_id = case when c.low_id = ${uid} then c.high_id else c.low_id end
-        left join lateral (
-          select body, sender_id, deleted_everyone, created_at
-          from cc_messages m
-          where m.conversation_id = c.id
-            and not exists (
-              select 1 from cc_hides h where h.message_id = m.id and h.user_id = ${uid}
-            )
-          order by m.created_at desc
-          limit 1
-        ) lm on true
-        left join lateral (
-          select count(*)::int as unread
-          from cc_messages m
-          where m.conversation_id = c.id
-            and m.sender_id <> ${uid}
-            and m.status <> 'read'
-            and m.deleted_everyone = false
-            and not exists (
-              select 1 from cc_hides h where h.message_id = m.id and h.user_id = ${uid}
-            )
-        ) uc on true
-        left join cc_typing t
-          on t.conversation_id = c.id and t.user_id <> ${uid}
-        where c.low_id = ${uid} or c.high_id = ${uid}
-        order by c.updated_at desc
-      `;
-      return rows.map((row) => {
-        const self = row.other_id === uid;
-        const deleted = asBool(row.last_deleted);
-        const hasLast = row.last_body !== null || deleted;
+      await touchProfile(db, uid);
+      const now = Date.now();
+      const conversations = await db.collection("conversations").find({
+        $or: [{ lowId: uid }, { highId: uid }],
+      }).sort({ updatedAt: -1 }).toArray();
+
+      await db.collection("messages").updateMany(
+        {
+          conversationId: { $in: conversations.map((conversation) => conversation.id) },
+          senderId: { $ne: uid },
+          status: "sent",
+          deletedEveryone: false,
+        },
+        { $set: { status: "delivered" } },
+      );
+
+      const result: Conversation[] = [];
+      for (const conversation of conversations as unknown as ConversationRow[]) {
+        const otherId = conversation.lowId === uid ? conversation.highId : conversation.lowId;
+        const self = otherId === uid;
+        const profile = self ? null : await db.collection("profiles").findOne<{ displayName: string; email: string | null; imageUrl: string | null; lastSeen: number }>({ userId: otherId });
+        const hides = await db.collection("hides").find({ userId: uid }).project({ messageId: 1 }).toArray();
+        const hiddenIds = new Set(hides.map((hide) => String(hide.messageId)));
+        const last = await db.collection("messages").find({
+          conversationId: conversation.id,
+          id: { $nin: [...hiddenIds] },
+        }).sort({ createdAt: -1 }).limit(1).next();
+        const unread = await db.collection("messages").countDocuments({
+          conversationId: conversation.id,
+          senderId: { $ne: uid },
+          status: { $ne: "read" },
+          deletedEveryone: false,
+          id: { $nin: [...hiddenIds] },
+        });
+        const typing = await db.collection("typing").findOne({
+          conversationId: conversation.id,
+          userId: { $ne: uid },
+          untilAt: { $gt: new Date(now) },
+        });
         let preview = "No messages yet";
-        if (hasLast && deleted) preview = "This message was deleted";
-        else if (row.last_body) {
-          preview = row.last_sender === uid ? `You: ${row.last_body}` : row.last_body;
-        }
-        return {
-          id: row.id,
-          otherId: row.other_id,
-          title: self ? "Message yourself" : row.display_name,
-          email: self ? null : row.email,
-          imageUrl: self ? null : row.image_url,
+        if (last?.deletedEveryone) preview = "This message was deleted";
+        else if (last?.body) preview = last.senderId === uid ? `You: ${last.body}` : String(last.body);
+
+        result.push({
+          id: conversation.id,
+          otherId,
+          title: self ? "Message yourself" : profile?.displayName ?? "CloudChat user",
+          email: self ? null : profile?.email ?? null,
+          imageUrl: self ? null : profile?.imageUrl ?? null,
           self,
-          online: self ? true : asBool(row.online),
-          lastSeen: num(row.last_seen),
+          online: self ? true : Boolean(profile && profile.lastSeen > now - 35_000),
+          lastSeen: profile?.lastSeen ?? 0,
           preview,
-          previewFromMe: row.last_sender === uid,
-          previewAt: row.last_at == null ? null : num(row.last_at),
-          unread: Number(row.unread) || 0,
-          typing: asBool(row.typing),
-          updatedAt: num(row.updated_at),
-        };
-      });
+          previewFromMe: last ? last.senderId === uid : false,
+          previewAt: last ? Number(last.createdAt) : null,
+          unread,
+          typing: Boolean(typing),
+          updatedAt: Number(conversation.updatedAt),
+        });
+      }
+      return result;
     } catch (error) {
       friendly(error);
     }
   });
 
-const threadInput = z.object({
-  conversationId: z.string().uuid(),
-});
+const threadInput = z.object({ conversationId: z.string().uuid() });
 
 export const thread = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseInput(threadInput, input))
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<{ messages: ChatMessage[]; typing: boolean }> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      await touchProfile(sql, uid);
-      const convo = await loadConversation(sql, uid, data.conversationId);
-      if (!convo) throw new Error("Conversation not found");
-      await sql`
-        update cc_messages
-        set status = 'read'
-        where conversation_id = ${convo.id}
-          and sender_id <> ${uid}
-          and status <> 'read'
-          and deleted_everyone = false
-      `;
-      const rows = await sql<{
-        id: string;
-        conversation_id: string;
-        sender_id: string;
-        body: string;
-        status: string;
-        deleted_everyone: unknown;
-        created_at: unknown;
-      }>`
-        select
-          id, conversation_id, sender_id, body, status, deleted_everyone,
-          (extract(epoch from created_at) * 1000)::bigint as created_at
-        from cc_messages m
-        where m.conversation_id = ${convo.id}
-          and not exists (
-            select 1 from cc_hides h where h.message_id = m.id and h.user_id = ${uid}
-          )
-        order by m.created_at asc
-        limit 500
-      `;
-      const typingRows = await sql<{ typing: unknown }>`
-        select (until_at > now()) as typing
-        from cc_typing
-        where conversation_id = ${convo.id} and user_id <> ${uid}
-        limit 1
-      `;
+      await touchProfile(db, uid);
+      const conversation = await loadConversation(db, uid, data.conversationId);
+      if (!conversation) throw new Error("Conversation not found");
+      await db.collection("messages").updateMany(
+        { conversationId: conversation.id, senderId: { $ne: uid }, status: { $ne: "read" }, deletedEveryone: false },
+        { $set: { status: "read" } },
+      );
+      const hides = await db.collection("hides").find({ userId: uid }).project({ messageId: 1 }).toArray();
+      const hiddenIds = new Set(hides.map((hide) => String(hide.messageId)));
+      const rows = await db.collection("messages").find({
+        conversationId: conversation.id,
+        id: { $nin: [...hiddenIds] },
+      }).sort({ createdAt: 1 }).limit(500).toArray();
+      const typing = await db.collection("typing").findOne({
+        conversationId: conversation.id,
+        userId: { $ne: uid },
+        untilAt: { $gt: new Date() },
+      });
       return {
-        messages: rows.map(mapMessage),
-        typing: asBool(typingRows[0]?.typing),
+        messages: rows.map((row) => mapMessage(row as unknown as Parameters<typeof mapMessage>[0])),
+        typing: Boolean(typing),
       };
     } catch (error) {
       friendly(error);
@@ -313,40 +236,34 @@ export const sendMessage = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<ChatMessage> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      await touchProfile(sql, uid);
-      const convo = await loadConversation(sql, uid, data.conversationId);
-      if (!convo) throw new Error("Conversation not found");
-      const peer = convo.low_id === uid ? convo.high_id : convo.low_id;
+      await touchProfile(db, uid);
+      const conversation = await loadConversation(db, uid, data.conversationId);
+      if (!conversation) throw new Error("Conversation not found");
+      const peer = conversation.lowId === uid ? conversation.highId : conversation.lowId;
       let status: ChatMessage["status"] = "sent";
       if (peer === uid) status = "read";
       else {
-        const onlineRows = await sql<{ online: unknown }>`
-          select (last_seen > now() - interval '35 seconds') as online
-          from cc_profiles
-          where user_id = ${peer}
-        `;
-        if (asBool(onlineRows[0]?.online)) status = "delivered";
+        const peerProfile = await db.collection("profiles").findOne<{ lastSeen: number }>({ userId: peer });
+        if (peerProfile && peerProfile.lastSeen > Date.now() - 35_000) status = "delivered";
       }
-      const id = crypto.randomUUID();
-      const rows = await sql<{
-        id: string;
-        conversation_id: string;
-        sender_id: string;
-        body: string;
-        status: string;
-        deleted_everyone: unknown;
-        created_at: unknown;
-      }>`
-        insert into cc_messages (id, conversation_id, sender_id, body, status)
-        values (${id}, ${convo.id}, ${uid}, ${data.body}, ${status})
-        returning
-          id, conversation_id, sender_id, body, status, deleted_everyone,
-          (extract(epoch from created_at) * 1000)::bigint as created_at
-      `;
-      await sql`update cc_conversations set updated_at = now() where id = ${convo.id}`;
-      return mapMessage(rows[0]);
+      const now = Date.now();
+      const message = {
+        id: crypto.randomUUID(),
+        conversationId: conversation.id,
+        senderId: uid,
+        body: data.body,
+        status,
+        deletedEveryone: false,
+        createdAt: now,
+      };
+      await db.collection("messages").insertOne(message);
+      await db.collection("conversations").updateOne(
+        { id: conversation.id },
+        { $set: { updatedAt: now } },
+      );
+      return mapMessage(message);
     } catch (error) {
       friendly(error);
     }
@@ -362,34 +279,28 @@ export const deleteMessage = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<{ ok: true }> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      const rows = await sql<{
+      const message = await db.collection("messages").findOne<{
         id: string;
-        sender_id: string;
-        conversation_id: string;
-      }>`
-        select m.id, m.sender_id, m.conversation_id
-        from cc_messages m
-        join cc_conversations c on c.id = m.conversation_id
-        where m.id = ${data.messageId}
-          and (c.low_id = ${uid} or c.high_id = ${uid})
-      `;
-      const message = rows[0];
+        senderId: string;
+        conversationId: string;
+      }>({ id: data.messageId });
       if (!message) throw new Error("Message not found");
+      const conversation = await loadConversation(db, uid, message.conversationId);
+      if (!conversation) throw new Error("Message not found");
       if (data.scope === "everyone") {
-        if (message.sender_id !== uid) throw new Error("Only the sender can delete for everyone");
-        await sql`
-          update cc_messages
-          set deleted_everyone = true, body = ''
-          where id = ${message.id}
-        `;
+        if (message.senderId !== uid) throw new Error("Only the sender can delete for everyone");
+        await db.collection("messages").updateOne(
+          { id: message.id },
+          { $set: { deletedEveryone: true, body: "" } },
+        );
       } else {
-        await sql`
-          insert into cc_hides (message_id, user_id)
-          values (${message.id}, ${uid})
-          on conflict do nothing
-        `;
+        await db.collection("hides").updateOne(
+          { messageId: message.id, userId: uid },
+          { $setOnInsert: { messageId: message.id, userId: uid } },
+          { upsert: true },
+        );
       }
       return { ok: true };
     } catch (error) {
@@ -407,19 +318,18 @@ export const setTyping = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<{ ok: true }> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      const convo = await loadConversation(sql, uid, data.conversationId);
-      if (!convo) throw new Error("Conversation not found");
-      if (!data.active || convo.low_id === convo.high_id) {
-        await sql`delete from cc_typing where conversation_id = ${convo.id} and user_id = ${uid}`;
+      const conversation = await loadConversation(db, uid, data.conversationId);
+      if (!conversation) throw new Error("Conversation not found");
+      if (!data.active || conversation.lowId === conversation.highId) {
+        await db.collection("typing").deleteOne({ conversationId: conversation.id, userId: uid });
       } else {
-        await sql`
-          insert into cc_typing (conversation_id, user_id, until_at)
-          values (${convo.id}, ${uid}, now() + interval '3 seconds')
-          on conflict (conversation_id, user_id)
-          do update set until_at = excluded.until_at
-        `;
+        await db.collection("typing").updateOne(
+          { conversationId: conversation.id, userId: uid },
+          { $set: { untilAt: new Date(Date.now() + 3_000) } },
+          { upsert: true },
+        );
       }
       return { ok: true };
     } catch (error) {
@@ -427,92 +337,76 @@ export const setTyping = createServerFn({ method: "POST" })
     }
   });
 
-const searchInput = z.object({
-  query: z.string().trim().min(1).max(80),
-});
+const searchInput = z.object({ query: z.string().trim().min(1).max(80) });
 
 export const searchUsers = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseInput(searchInput, input))
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<Person[]> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      await touchProfile(sql, uid);
-      const pattern = likePattern(data.query);
-      const rows = await sql<{
-        user_id: string;
-        display_name: string;
-        email: string | null;
-        image_url: string | null;
-        last_seen: unknown;
-        online: unknown;
-      }>`
-        select
-          u."id" as user_id,
-          u."name" as display_name,
-          u."email" as email,
-          u."image" as image_url,
-          (extract(epoch from p.last_seen) * 1000)::bigint as last_seen,
-          (p.last_seen > now() - interval '35 seconds') as online
-        from "user" u
-        left join cc_profiles p on p.user_id = u."id"
-        where u."id" <> ${uid}
-          and (
-            u."name" ilike ${pattern} escape ${"\\"}
-            or u."email" ilike ${pattern} escape ${"\\"}
-          )
-        order by u."name" asc
-        limit 20
-      `;
-      return rows.map((row) => ({
-        userId: row.user_id,
-        displayName: row.display_name,
-        email: row.email,
-        imageUrl: row.image_url,
-        online: asBool(row.online),
-        lastSeen: num(row.last_seen),
-      }));
+      await touchProfile(db, uid);
+      const escaped = data.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const users = await db.collection("user").find({
+        id: { $ne: uid },
+        $or: [
+          { name: { $regex: escaped, $options: "i" } },
+          { email: { $regex: escaped, $options: "i" } },
+        ],
+      }).sort({ name: 1 }).limit(20).toArray();
+      const people: Person[] = [];
+      for (const user of users as unknown as Array<{ id: string; name?: string; email?: string; image?: string }>) {
+        const profile = await db.collection("profiles").findOne<{ lastSeen: number }>({ userId: user.id });
+        people.push({
+          userId: user.id,
+          displayName: user.name ?? "CloudChat user",
+          email: user.email ?? null,
+          imageUrl: user.image ?? null,
+          online: Boolean(profile && profile.lastSeen > Date.now() - 35_000),
+          lastSeen: profile?.lastSeen ?? 0,
+        });
+      }
+      return people;
     } catch (error) {
       friendly(error);
     }
   });
 
-const openInput = z.object({
-  otherUserId: z.string().trim().min(1).max(200),
-});
+const openInput = z.object({ otherUserId: z.string().trim().min(1).max(200) });
 
 export const openChat = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseInput(openInput, input))
   .middleware([authMiddleware])
   .handler(async ({ context, data }): Promise<{ conversationId: string }> => {
     try {
-      const sql = await getSql();
+      const db = await getMongoDatabase();
       const uid = context.userId;
-      await touchProfile(sql, uid);
+      await touchProfile(db, uid);
       const other = data.otherUserId;
       if (other !== uid) {
-        const found = await sql<{ id: string }>`select "id" as id from "user" where "id" = ${other}`;
-        if (!found[0]) throw new Error("User not found");
-        await sql`
-          insert into cc_profiles (user_id, display_name, email, image_url, last_seen)
-          select "id", "name", "email", "image", "createdAt"
-          from "user"
-          where "id" = ${other}
-          on conflict (user_id) do nothing
-        `;
+        const found = await db.collection("user").findOne<{ id: string; name?: string; email?: string; image?: string }>({ id: other });
+        if (!found) throw new Error("User not found");
+        await db.collection("profiles").updateOne(
+          { userId: other },
+          {
+            $setOnInsert: {
+              displayName: found.name ?? "CloudChat user",
+              email: found.email ?? null,
+              imageUrl: found.image ?? null,
+              lastSeen: Date.now(),
+            },
+          },
+          { upsert: true },
+        );
       }
-      const low = uid < other ? uid : other;
-      const high = uid < other ? other : uid;
+      const lowId = uid < other ? uid : other;
+      const highId = uid < other ? other : uid;
+      const existing = await db.collection("conversations").findOne<{ id: string }>({ lowId, highId });
+      if (existing) return { conversationId: existing.id };
       const id = crypto.randomUUID();
-      const rows = await sql<{ id: string }>`
-        insert into cc_conversations (id, low_id, high_id)
-        values (${id}, ${low}, ${high})
-        on conflict (low_id, high_id) do update
-          set updated_at = cc_conversations.updated_at
-        returning id
-      `;
-      return { conversationId: rows[0].id };
+      await db.collection("conversations").insertOne({ id, lowId, highId, updatedAt: Date.now() });
+      return { conversationId: id };
     } catch (error) {
       friendly(error);
     }
