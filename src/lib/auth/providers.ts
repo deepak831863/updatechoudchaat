@@ -7,8 +7,8 @@
  * server-only Better Auth instance (and `pg`) into the browser bundle.
  *
  * Each app federates to the shared **auth broker** (`GROK_AUTH_ISSUER`), which
- * holds the real Google/X secrets. The app never sees them — it only knows its
- * own per-app client id/secret and which upstream to ask the broker for (`idp`).
+ * holds the real Google secret. The app never sees it — it only knows its
+ * own per-app client id/secret and asks the broker for Google (`idp`).
  *
  * To add an upstream (e.g. GitHub) once the broker supports it: add one entry
  * here (`{ providerId: "grok-github", idp: "github", label: "GitHub" }`). The
@@ -27,5 +27,4 @@ export type GrokProvider = {
 
 export const GROK_PROVIDERS: readonly GrokProvider[] = [
   { providerId: "grok-google", idp: "google", label: "Google" },
-  { providerId: "grok-x", idp: "twitter", label: "X" },
 ];

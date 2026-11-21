@@ -2,7 +2,7 @@
  * Self-hosted Better Auth for THIS app (server-only).
  *
  * Pre-wired for live preview + deploy — do not rewrite this file. To enable
- * local email/password, flip the flag in `./email-password` only (see auth skill).
+ * email/password is disabled; this app exposes Google sign-in only.
  *
  * The app runs its own Better Auth at `/api/auth/*`, so the session cookie stays
  * on this app's own origin. Sign-in federates to the shared **Grok auth broker**
@@ -91,7 +91,13 @@ export const authConfigured =
 // it derives the origin per-request from the (proxied) host, validated against the
 // preview allowlist, which makes the OAuth `redirect_uri` the concrete preview URL
 // the broker's preview client accepts.
-const explicitBaseURL = env("BETTER_AUTH_URL");
+const explicitBaseURL = env("BETTER_AUTH_URL")?.replace(/\/+$/, "");
+const vercelUrl = env("VERCEL_URL");
+const vercelProductionUrl = env("VERCEL_PROJECT_PRODUCTION_URL");
+const configuredTrustedOrigins = env("BETTER_AUTH_TRUSTED_ORIGINS")
+  ?.split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean) ?? [];
 // Explicit `string[]` (not a readonly tuple) — Better Auth's DynamicBaseURLConfig
 // requires a mutable `allowedHosts: string[]`.
 const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
@@ -116,13 +122,22 @@ const baseURL = explicitBaseURL ?? {
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
 const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS]
+  ? [
+      explicitBaseURL,
+      ...LOCAL_DEV_ORIGINS,
+      ...configuredTrustedOrigins,
+      ...(vercelUrl ? [`https://${vercelUrl}`] : []),
+      ...(vercelProductionUrl ? [`https://${vercelProductionUrl}`] : []),
+    ]
   : [
       // Host wildcards (matched against Origin's host)
       ...previewAllowedHosts,
       // Full-origin wildcards (matched against Origin)
       ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
       ...LOCAL_DEV_ORIGINS,
+      ...configuredTrustedOrigins,
+      ...(vercelUrl ? [`https://${vercelUrl}`] : []),
+      ...(vercelProductionUrl ? [`https://${vercelProductionUrl}`] : []),
     ];
 
 const mongodbUri = env("MONGODB_URI");
